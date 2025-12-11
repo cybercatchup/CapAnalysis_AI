@@ -52,7 +52,7 @@ MODULE_PATH = modules
 XPL_LIB = 
 
 # src file
-SRC = capanalysis.c session_decoding.c dbinterface.c pkginstall.c log.c
+SRC = capanalysis.c session_decoding.c dbinterface.c pkginstall.c log.c utils.c
 
 # compilation
 INCLUDE_DIR = -I$(ROOT_DIR)/include

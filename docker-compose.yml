@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: capana
+      POSTGRES_PASSWORD: securepassword
+      POSTGRES_DB: capanalysis
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U capana"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  engine:
+    build: .
+    volumes:
+      - ./pcap_data:/opt/capanalysis/data
+      - ./logs:/opt/capanalysis/log
+    depends_on:
+      db:
+        condition: service_healthy
+    # We override the command to ensure we point to the correct DB host
+    # Ideally, we should update canalysis.cfg via sed in an entrypoint script
+    command: >
+      sh -c "sed -i 's/DB_HOST=localhost/DB_HOST=db/' cfg/canalysis.cfg &&
+             sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=securepassword/' cfg/canalysis.cfg &&
+             ./bin/capanalysis -b postgres -c cfg/canalysis.cfg"
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://capana:securepassword@db/capanalysis
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
