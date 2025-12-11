@@ -32,7 +32,7 @@ class DatasetsController extends AppController {
             $this->Session->setFlash(__('The Dataset has been saved'));
             return true;
         }
-        $this->Session->setFlash(__("Merda! It's a bug"));
+        $this->Session->setFlash(__('The demo dataset could not be saved. Please, try again.'));
         return false;
     }
     
