@@ -38,7 +38,7 @@ static dbtype dbt;                 /* db type */
 static dbconf bconf;               /* a copy of native configuration */
 
 
-static int DBIntQuery(char *query, unsigned long *id)
+static int DBIntQuery(const char *query, unsigned long *id)
 {
     int ret;
     short try = 1;
@@ -60,13 +60,46 @@ static int DBIntQuery(char *query, unsigned long *id)
             }
         } while(try--);
         if (ret == 0 && id != NULL) {
-            *id = atol(PQgetvalue(res, 0, 0));
+            if (PQntuples(res) > 0)
+                *id = atol(PQgetvalue(res, 0, 0));
         }
         if (ret == 0) {
             PQclear(res);
         }
     }
-    #warning "to complete"
+
+    return ret;
+}
+
+static int DBIntQueryParams(const char *query, int nParams, const char *const *paramValues, unsigned long *id)
+{
+    int ret;
+    short try = 1;
+    PGresult *res;
+
+    ret = -1;
+    if (dbt == DB_POSTGRESQL) {
+        do {
+            res = PQexecParams(psql, query, nParams, NULL, paramValues, NULL, NULL, 0);
+            if (PQresultStatus(res) != PGRES_COMMAND_OK && PQresultStatus(res) != PGRES_TUPLES_OK) {
+                LogPrintf(LV_ERROR, "PQexecParams: %s", PQresultErrorMessage(res));
+                PQclear(res);
+                DBIntClose();
+                DBIntInit(&bconf);
+            }
+            else {
+                ret = 0;
+                break;
+            }
+        } while(try--);
+        if (ret == 0 && id != NULL) {
+             if (PQntuples(res) > 0)
+                *id = atol(PQgetvalue(res, 0, 0));
+        }
+        if (ret == 0) {
+            PQclear(res);
+        }
+    }
 
     return ret;
 }
@@ -189,13 +222,24 @@ int DBIntClose(void)
 
 int DBIntFilePcap(int ds_id, size_t size, const char *name, const char *md5, const char *sha1, unsigned long *id)
 {
-    char query[DBINT_QUERY_DIM];
+    char ds_id_str[32];
+    char size_str[32];
+    char id_str[32];
+    const char *params[5];
 
     if (*id == 0) {
         switch (dbt) {
         case DB_POSTGRESQL:
-            sprintf(query, DBINT_1_QUERY_FILE, ds_id, size, name, "---", "---");
-            if (DBIntQuery(query, id) != 0) {
+            sprintf(ds_id_str, "%d", ds_id);
+            sprintf(size_str, "%zu", size);
+            /* INSERT INTO capfiles (dataset_id, data_size, filename, md5, sha1) VALUES ($1, $2, $3, $4, $5) RETURNING id; */
+            const char *stmt = "INSERT INTO capfiles (dataset_id, data_size, filename, md5, sha1) VALUES ($1, $2, $3, $4, $5) RETURNING id;";
+            params[0] = ds_id_str;
+            params[1] = size_str;
+            params[2] = name;
+            params[3] = "---";
+            params[4] = "---";
+            if (DBIntQueryParams(stmt, 5, params, id) != 0) {
                 return -1;
             }
             break;
@@ -208,8 +252,13 @@ int DBIntFilePcap(int ds_id, size_t size, const char *name, const char *md5, con
     else {
         switch (dbt) {            
         case DB_POSTGRESQL:
-            sprintf(query, DBINT_1_QUERY_UPDATE_FILE, md5, sha1, *id);
-            if (DBIntQuery(query, NULL) != 0) {
+            /* UPDATE capfiles SET md5=$1, sha1=$2 WHERE id=$3; */
+            sprintf(id_str, "%lu", *id);
+            const char *stmt = "UPDATE capfiles SET md5=$1, sha1=$2 WHERE id=$3;";
+            params[0] = md5;
+            params[1] = sha1;
+            params[2] = id_str;
+            if (DBIntQueryParams(stmt, 3, params, NULL) != 0) {
                 return -1;
             }
             break;

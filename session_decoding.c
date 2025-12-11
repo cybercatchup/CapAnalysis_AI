@@ -52,6 +52,7 @@
 #include "dbinterface.h"
 #include "config_file.h"
 #include "log.h"
+#include "utils.h"
 
 #define CA_MNP_STR_DIM     32
 #define CA_PCAP_BUFFER     (1024*1024)
@@ -327,7 +328,8 @@ static void *SeDePcapThread(void *data)
     ssl = NULL;
     if (ssl_cert != NULL) {
         /* create new server-method instance */
-        method = SSLv23_server_method();
+        /* Updated to modern TLS method */
+        method = TLS_server_method();
         if (method == NULL) {
             ERR_print_errors_fp(stderr);
             abort();
@@ -655,8 +657,15 @@ int SeDeFind(char *main_dir, dsdec *tbl, int dim)
                     }
                         
                     /* enable samba shared folder */
-                    sprintf(cmd, CA_SAMBA_RM_DS, ds_id, ds_id);
-                    ret = system(cmd);
+                    /* NOTE: In a modernized container environment, modifying the host Samba config
+                       is not recommended and often not possible. We keep the logic but use run_command
+                       or ideally, disable it if not needed. For this refactor, we just make it safer.
+                    */
+                    char sed_cmd[CA_FILENAME_PATH];
+                    safe_snprintf(sed_cmd, sizeof(sed_cmd), "/#capanalysis_s_ds_%08i/,/#capanalysis_e_ds_%08i/d", ds_id, ds_id);
+                    char *sed_args[] = {"sed", "-i", sed_cmd, CA_SAMBA_CFG_FILE, NULL};
+                    ret = run_command("sed", sed_args);
+
                     fp = fopen(CA_SAMBA_CFG_FILE, "a");
                     if (fp != NULL) {
                         sprintf(cmd, CA_NEW_DIR, main_dir, ds_id);
@@ -664,8 +673,11 @@ int SeDeFind(char *main_dir, dsdec *tbl, int dim)
                         LogPrintf(LV_INFO, "SMB name: "CA_SAMBA_FOLDER_NAME, ds_id);
                         fprintf(fp, CA_SAMBA_ADD_DS, ds_id, ds_id, main_dir, ds_id, ds_id);
                         fclose(fp);
-                        ret = system(CA_SAMBA_RESTART_SERVICE);
-                        ret = system(CA_SAMBA_RESTART_SYSTEMCTL);
+
+                        char *smb_restart_args[] = {"service", "smbd", "restart", NULL};
+                        ret = run_command("service", smb_restart_args);
+                        char *nmb_restart_args[] = {"service", "nmbd", "restart", NULL};
+                        ret = run_command("service", nmb_restart_args);
                     }
                     tbl[next].ds_id = ds_id;
                     tbl[next].run = FALSE;
@@ -771,8 +783,9 @@ int SeDeStart(dbconf *db_c, char *main_dir, int ds, task *pid, bool rt, char *in
         /* create config file */
         sprintf(config_file, "%s/cfg/%s", main_dir, xpl_cfg);
         sprintf(work_dir, CA_TMP_DIR, main_dir, ds);
-        sprintf(cmd, "cp -a %s %s", config_file, work_dir);
-        ret = system(cmd);
+
+        char *cp_args[] = {"cp", "-a", config_file, work_dir, NULL};
+        ret = run_command("cp", cp_args);
         
         /* log, ds */
         sprintf(config_file, CA_TMP_DIR"/%s", main_dir, ds, xpl_cfg);

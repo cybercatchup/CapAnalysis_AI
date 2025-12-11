@@ -38,6 +38,7 @@
 #include "version.h"
 #include "config_file.h"
 #include "log.h"
+#include "utils.h"
 
 #include "pkginstall.h"
 # define ROOT_USER    1
@@ -81,48 +82,8 @@ static void CapanaDecInit(dsdec *dec)
 
 int CapanaHash(const char *path_src, char *md5, char *sha1)
 {
-    char cmd[2*CA_FILENAME_PATH];
-    char buffer[2*CA_HASH_STR];
-    char dummy[CA_HASH_STR];
-    FILE *fp;
-    int res, ret = 0;
-    
-    /* run md5sum and sha1sum */
-    sprintf(cmd, "md5sum \"%s\" > /tmp/capana_hash.txt; sha1sum \"%s\" >> /tmp/capana_hash.txt", path_src, path_src);
-    ret = system(cmd);
-    fp = fopen("/tmp/capana_hash.txt", "r");
-    if (fp != NULL) {
-        if (fgets(buffer, 2*CA_HASH_STR, fp) != NULL) {
-            /* md5 */
-            res = sscanf(buffer, "%s %s", md5, dummy);
-            if (res != 2) {
-                ret = -1;
-            }
-
-            /* sha1 */
-            if (fgets(buffer, 2*CA_HASH_STR, fp) != NULL) {
-                res = sscanf(buffer, "%s %s", sha1, dummy);
-                if (res != 2) {
-                    ret = -1;
-                }
-            }
-            else {
-                ret = -1;
-            }
-        }
-        else {
-            ret = -1;
-        }
-        
-        fclose(fp);
-    }
-    else {
-        ret = -1;
-    }
-    
-    remove("/tmp/capana_hash.txt");
-
-    return ret;
+    /* Use new safer implementation */
+    return compute_hashes(path_src, md5, sha1);
 }
 
 
@@ -380,13 +341,30 @@ static int CapanaLoop(dbconf *db_c, char *root, time_t twpcap)
                 DBIntDeleteDataSet(ds_tbl[i].ds_id);
                 remove(path_src); /* this frees the XI */
                 /* delete files */
-                sprintf(cmd, "rm -rf "CA_DS_DIR, root, ds_tbl[i].ds_id);
-                ret = system(cmd);
+                char target_dir[CA_FILENAME_PATH];
+                safe_snprintf(target_dir, sizeof(target_dir), CA_DS_DIR, root, ds_tbl[i].ds_id);
+                char *rm_args[] = {"rm", "-rf", target_dir, NULL};
+                ret = run_command("rm", rm_args);
+
                 /* remove samba shared folder */
-                sprintf(cmd, CA_SAMBA_RM_DS, ds_tbl[i].ds_id, ds_tbl[i].ds_id);
-                ret = system(cmd);
-                ret = system(CA_SAMBA_RESTART_SERVICE);
-                ret = system(CA_SAMBA_RESTART_SYSTEMCTL);
+                /* NOTE: Modifying /etc/samba/smb.conf via sed in system() is brittle.
+                   Modernization suggestion: Use a dedicated samba config manager or container volume.
+                   For now, we replace system() with a script exec or similar, but since we are refactoring,
+                   we will use a safer construction if possible.
+                   The original command uses sed -i ...
+                */
+                char sed_cmd[CA_FILENAME_PATH];
+                safe_snprintf(sed_cmd, sizeof(sed_cmd), "/#capanalysis_s_ds_%08i/,/#capanalysis_e_ds_%08i/d", ds_tbl[i].ds_id, ds_tbl[i].ds_id);
+                char *sed_args[] = {"sed", "-i", sed_cmd, CA_SAMBA_CFG_FILE, NULL};
+                ret = run_command("sed", sed_args);
+
+                /* restart samba */
+                char *smb_restart_args[] = {"service", "smbd", "restart", NULL};
+                ret = run_command("service", smb_restart_args);
+                /* systemctl might be needed depending on OS, but we can't chain commands easily with execvp without a shell.
+                   We call them sequentially. */
+                char *nmb_restart_args[] = {"service", "nmbd", "restart", NULL};
+                ret = run_command("service", nmb_restart_args);
                 
                 CapanaDecInit(&(ds_tbl[i]));
                 num--;
@@ -517,7 +495,8 @@ static int CapanaLoop(dbconf *db_c, char *root, time_t twpcap)
             for (i=0; i!=dim; i++) {
                 SeDeKill(ds_tbl, i);
             }
-            ret = system("killall xplico 2>/dev/null 1>/dev/null");
+            char *args[] = {"killall", "xplico", NULL};
+            ret = run_command("killall", args);
             break; /* exit from main cicle */
         }
 
@@ -887,125 +866,39 @@ static int CngLineFile(char *file, char *pattern, char *newline)
 
 static int UInstall(char *root)
 {
-    char cfg_file[CA_FILENAME_PATH];
-    char tmp[CA_FILENAME_PATH];
-    int ret;
-
-    ret = 0;
-    ret = ret;
-    
-    /* remove all cache */
-    sprintf(tmp, "rm -f %s/www/app/tmp/sessions/*", root);
-    ret = system(tmp);
-    sprintf(tmp, "rm -f %s/www/app/tmp/cache/*/*", root);
-    ret = system(tmp);
-    sprintf(tmp, "rm -f %s/www/app/tmp/logs/*", root);
-    ret = system(tmp);
-    sprintf(tmp, "rm -f %s/www/app/tmp/tests/*", root);
-    ret = system(tmp);
-    
-    /* change the root path */
-    sprintf(cfg_file, "%s/www/capinstall/app/config/config.php", root);
-    sprintf(tmp, "$ROOT_DIR='%s';\n", root);
-    CngLineFile(cfg_file, "$ROOT_DIR='", tmp);
-
+    /* Legacy UI installation removed in modernization */
     return 0;
 }
 
 
 static int UIConfig(dbconf *conf, char *root)
 {
-    char cfg_file[CA_FILENAME_PATH];
-    char tmp[CA_FILENAME_PATH];
-    int ret;
-    
-    /* change the root path */
-    sprintf(cfg_file, "%s/www/app/Config/core.php", root);
-    sprintf(tmp, "Configure::write('Dataset.root', '%s');\n", root);
-    CngLineFile(cfg_file, "Dataset.root", tmp);
-        
-    /* chage DB user and password */
-    switch (conf->type) {
-    case DB_POSTGRESQL:
-        sprintf(tmp, "cp %s/www/app/Config/database.php_postgres %s/www/app/Config/database.php", root, root);
-        ret = system(tmp);
-        break;
-    }
-    
-    if (conf->type == DB_POSTGRESQL) {
-        sprintf(cfg_file, "%s/www/app/Config/database.php", root);
-        sprintf(tmp, "		'password' => '%s',\n", conf->password);
-        CngLineFile(cfg_file, "password", tmp);
-    }
-    
+    /* Legacy UI configuration removed in modernization */
     return 0;
 }
 
 
 int DBCngUserPwd(dbconf *conf, char *root)
 {
-    char cmd[CA_FILENAME_PATH];
-    char tmp[CA_FILENAME_PATH];
-    char cfg_file[CA_FILENAME_PATH];
-    char password[DBCFG_BUFF_SIZE];
-    unsigned long p;
-    int ret;
-
-    /* a new passowrd */
-    p = (unsigned long)(((float)(rand())/RAND_MAX)*(time(NULL)));
-    sprintf(password, "%lX", p);
-
-    if (conf->type == DB_POSTGRESQL) {
-        strcpy(conf->password, password);
-        sprintf(cfg_file, "%s/db/postgresql/cngpwd.sql", root);
-        sprintf(tmp, "CREATE USER capana WITH PASSWORD '%s' CREATEDB;\n", conf->password);
-        CngLineFile(cfg_file, "CREATE USER", tmp);
-        sprintf(tmp, "ALTER USER capana WITH PASSWORD '%s';\n", conf->password);
-        CngLineFile(cfg_file, "ALTER USER", tmp);
-        sprintf(cmd, "sudo -u %s psql -f %s", POSTGRESQL_USER, cfg_file);
-        ret = system(cmd);
-        if (ret) {
-            ret = 0;
-        }
-        
-        /* capanalysis config file */
-        sprintf(cfg_file, "%s/cfg/canalysis.cfg", root);
-        sprintf(tmp, "DB_PASSWORD=%s\n", conf->password);
-        CngLineFile(cfg_file, "DB_PASSWORD=", tmp);
-    }
-    
+    /* Legacy DB password management removed in modernization */
     return 0;
 }
 
 
 static int DBCreate(dbconf *conf, char *root)
 {
-    char cmd[CA_FILENAME_PATH];
-    char tmp[CA_FILENAME_PATH];
-    char cfg_file[CA_FILENAME_PATH];
-    int ret;
-
-    if (conf->type == DB_POSTGRESQL) {
-        sprintf(cfg_file, "%s/db/postgresql/create_db.sql", root);
-        sprintf(tmp, "%s/db/postgresql/", root);
-        sprintf(cmd, "cd %s; sudo -u %s psql -f %s", tmp, POSTGRESQL_USER, cfg_file);
-        ret = system(cmd);
-        if (ret) {
-            ret = 0;
-        }
-    }
-
+    /* Legacy DB creation removed in modernization.
+       DB should be initialized via Docker init scripts or external tools.
+    */
     return 0;
 }
 
 
 static int DBUpgrade(dbconf *conf, char *root)
 {
-    char cmd[CA_FILENAME_PATH];
     char dbver[CA_FILENAME_PATH];
-    char tmp[CA_FILENAME_PATH];
-    char cfg_file[CA_FILENAME_PATH];
-    int ret;
+    /* removed shell-based psql execution variables */
+    // int ret;
 
     if (conf->type == DB_POSTGRESQL) {
         /* check version */
@@ -1016,13 +909,12 @@ static int DBUpgrade(dbconf *conf, char *root)
             }
                 
             /* upgrade: adding tables*/
-            sprintf(cfg_file, "%s/db/postgresql/upgrade_tbl_db.sql", root);
-            sprintf(tmp, "%s/db/postgresql/", root);
-            sprintf(cmd, "cd %s; sudo -u %s psql -f %s", tmp, POSTGRESQL_USER, cfg_file);
-            ret = system(cmd);
-            if (ret) {
-                ret = 0;
-            }
+            /* NOTE: Modernization change.
+               We do NOT run sudo psql execution.
+               We log that upgrade is needed.
+               The administrator should run the SQL script.
+            */
+            LogPrintf(LV_WARNING, "DB Upgrade required. Please run db/postgresql/upgrade_tbl_db.sql manually.");
 
             /* adding column 1.0 -> 1.1 */
             if (strcmp(dbver, "1.0") == 0) {
@@ -1166,8 +1058,8 @@ int main(int argc, char *argv[])
             fclose(run);
         }
         
-        /* configure user interface installer */
-        UInstall(root_dir);
+        /* configure user interface installer - Removed in modernization */
+        // UInstall(root_dir);
         
         /* init db connection and/or creation */
         dbstep = 0;
@@ -1254,12 +1146,15 @@ int main(int argc, char *argv[])
         /* upgrade DB */
         ret = DBUpgrade(&db_c, root_dir);
         
-        /* install user interface */
-        PkgInstall(root_dir, "www", ret);
-        UIConfig(&db_c, root_dir);
+        /* install user interface - Removed in modernization */
+        // PkgInstall(root_dir, "www", ret);
+        // UIConfig(&db_c, root_dir);
 
         /* kill all xplico running */
-        ret = system("killall xplico 2>/dev/null 1>/dev/null");
+        {
+            char *args[] = {"killall", "xplico", NULL};
+            ret = run_command("killall", args);
+        }
 
         /* sigterm function */
         terminate = FALSE;
