@@ -32,7 +32,7 @@ class DatasetsController extends AppController {
             $this->Session->setFlash(__('The Dataset has been saved'));
             return true;
         }
-        $this->Session->setFlash(__('The demo dataset could not be saved. Please, try again.'));
+        $this->Session->setFlash(__('The demo dataset could not be saved. Please try again.'));
         return false;
     }
     
@@ -199,7 +199,7 @@ class DatasetsController extends AppController {
           break;
       }
       if ($error == true) {
-        $this->Session->setFlash(__('Depth value is wrong. Please, try again.'));
+        $this->Session->setFlash(__('Depth value is wrong. Please try again.'));
             }
             else if ($this->Dataset->save($this->request->data)) {
         mkdir(Configure::read('Dataset.root').'/ds_'.$this->Dataset->id);
@@ -208,7 +208,7 @@ class DatasetsController extends AppController {
         $added = true;
       }
       else {
-        $this->Session->setFlash(__('The dataset could not be saved. Please, try again.'));
+        $this->Session->setFlash(__('The dataset could not be saved. Please try again.'));
       }
     }
     $ds_count = $this->Dataset->find('count');
