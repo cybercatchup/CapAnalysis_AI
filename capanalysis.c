@@ -40,7 +40,6 @@
 #include "log.h"
 #include "utils.h"
 
-#include "pkginstall.h"
 # define ROOT_USER    1
 
 static volatile bool terminate;
@@ -864,20 +863,6 @@ static int CngLineFile(char *file, char *pattern, char *newline)
 }
 
 
-static int UInstall(char *root)
-{
-    /* Legacy UI installation removed in modernization */
-    return 0;
-}
-
-
-static int UIConfig(dbconf *conf, char *root)
-{
-    /* Legacy UI configuration removed in modernization */
-    return 0;
-}
-
-
 int DBCngUserPwd(dbconf *conf, char *root)
 {
     /* Legacy DB password management removed in modernization */
@@ -1058,9 +1043,6 @@ int main(int argc, char *argv[])
             fclose(run);
         }
         
-        /* configure user interface installer - Removed in modernization */
-        // UInstall(root_dir);
-        
         /* init db connection and/or creation */
         dbstep = 0;
         do {
@@ -1145,10 +1127,6 @@ int main(int argc, char *argv[])
         
         /* upgrade DB */
         ret = DBUpgrade(&db_c, root_dir);
-        
-        /* install user interface - Removed in modernization */
-        // PkgInstall(root_dir, "www", ret);
-        // UIConfig(&db_c, root_dir);
 
         /* kill all xplico running */
         {
