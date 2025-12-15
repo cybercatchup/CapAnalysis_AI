@@ -34,15 +34,17 @@
 
 /* postgres, sqlite */
 static PGconn *psql;               /* Postgres DB */
+static sqlite3 *sqlite_db;         /* Sqlite DB */
 static dbtype dbt;                 /* db type */
 static dbconf bconf;               /* a copy of native configuration */
 
 
-static int DBIntQuery(char *query, unsigned long *id)
+int DBIntQuery(char *query, unsigned long *id)
 {
     int ret;
     short try = 1;
     PGresult *res;
+    sqlite3_stmt *stmt;
 
     ret = -1;
     if (dbt == DB_POSTGRESQL) {
@@ -66,18 +68,43 @@ static int DBIntQuery(char *query, unsigned long *id)
             PQclear(res);
         }
     }
-    #warning "to complete"
+    else if (dbt == DB_SQLITE) {
+        do {
+            if (id != NULL) {
+                if (sqlite3_prepare_v2(sqlite_db, query, -1, &stmt, NULL) == SQLITE_OK) {
+                    if (sqlite3_step(stmt) == SQLITE_ROW) {
+                        *id = sqlite3_column_int64(stmt, 0);
+                    }
+                    sqlite3_finalize(stmt);
+                    ret = 0;
+                    break;
+                }
+            }
+            else {
+                if (sqlite3_exec(sqlite_db, query, NULL, NULL, NULL) == SQLITE_OK) {
+                    ret = 0;
+                    break;
+                }
+            }
+
+            LogPrintf(LV_ERROR, "sqlite3_exec: %s", sqlite3_errmsg(sqlite_db));
+            DBIntClose();
+            DBIntInit(&bconf);
+        } while(try--);
+    }
 
     return ret;
 }
 
 
-static int DBIntQueryStr(char *query, char *str, int len)
+int DBIntQueryStr(char *query, char *str, int len)
 {
     int ret;
     short try = 1;
     PGresult *res;
     char *val;
+    sqlite3_stmt *stmt;
+    const unsigned char *sval;
     
     ret = -1;
     if (dbt == DB_POSTGRESQL) {
@@ -110,7 +137,41 @@ static int DBIntQueryStr(char *query, char *str, int len)
             PQclear(res);
         }
     }
-    #warning "to complete"
+    else if (dbt == DB_SQLITE) {
+        do {
+            if (str != NULL) {
+                if (sqlite3_prepare_v2(sqlite_db, query, -1, &stmt, NULL) == SQLITE_OK) {
+                    if (sqlite3_step(stmt) == SQLITE_ROW) {
+                        sval = sqlite3_column_text(stmt, 0);
+                        if (sval != NULL) {
+                            if (snprintf(str, len, "%s", sval) >= len) {
+                                LogPrintf(LV_ERROR, "Depth mal formed: %s", sval);
+                                str[0] = '\0';
+                            }
+                        }
+                        else {
+                            str[0] = '\0';
+                        }
+                    }
+                    else {
+                        str[0] = '\0';
+                    }
+                    sqlite3_finalize(stmt);
+                    ret = 0;
+                    break;
+                }
+            }
+            else {
+                /* this function is used to get a string value */
+                ret = -1;
+                break;
+            }
+
+            LogPrintf(LV_ERROR, "sqlite3_exec: %s", sqlite3_errmsg(sqlite_db));
+            DBIntClose();
+            DBIntInit(&bconf);
+        } while(try--);
+    }
 
     return ret;
 }
@@ -122,10 +183,10 @@ int DBIntInit(dbconf *conf)
     char con_param[DBINT_QUERY_DIM];
 
     dbt = conf->type;
+    memcpy(&bconf, conf, sizeof(dbconf));
 
     if (dbt == DB_POSTGRESQL) {
         /* postgresql */
-        memcpy(&bconf, conf, sizeof(dbconf));
         sprintf(con_param, "host = '%s' dbname = '%s' user = '%s' password = '%s' connect_timeout = '900'", bconf.host, bconf.name, bconf.user, bconf.password);
         psql = PQconnectdb(con_param);
         if (!psql) {
@@ -153,6 +214,13 @@ int DBIntInit(dbconf *conf)
             return res;
         }
     }
+    else if (dbt == DB_SQLITE) {
+        if (sqlite3_open(bconf.file, &sqlite_db)) {
+            LogPrintf(LV_ERROR, "Can't open database: %s\n", sqlite3_errmsg(sqlite_db));
+            sqlite3_close(sqlite_db);
+            return -1;
+        }
+    }
     else {
         return -1;
     }
@@ -160,6 +228,7 @@ int DBIntInit(dbconf *conf)
     /* fix status on DB */
     switch (dbt) {
     case DB_POSTGRESQL:
+    case DB_SQLITE:
         break;
     
     default:
@@ -178,6 +247,10 @@ int DBIntClose(void)
         PQfinish(psql);
         break;
     
+    case DB_SQLITE:
+        sqlite3_close(sqlite_db);
+        break;
+
     default:
         return -1;
         break;

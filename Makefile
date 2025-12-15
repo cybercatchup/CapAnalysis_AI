@@ -97,7 +97,7 @@ LDFLAGS += -lsqlite3
 # To make it visible
 export CC CCPP ROOT_DIR CFLAGS LDFLAGS INCLUDE_DIR INSTALL_DIR GEOIP_LIB
 
-all: subdir capanalysis cpxplico check_version
+all: subdir capanalysis check_version
 
 help:
 	@echo "Flags:"

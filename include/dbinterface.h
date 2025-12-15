@@ -54,7 +54,8 @@
 
 
 typedef enum {
-    DB_POSTGRESQL
+    DB_POSTGRESQL,
+    DB_SQLITE
 } dbtype;
 
 
