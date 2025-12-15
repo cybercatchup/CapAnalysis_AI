@@ -52,7 +52,7 @@ MODULE_PATH = modules
 XPL_LIB = 
 
 # src file
-SRC = capanalysis.c session_decoding.c dbinterface.c pkginstall.c log.c utils.c
+SRC = capanalysis.c session_decoding.c dbinterface.c log.c utils.c
 
 # compilation
 INCLUDE_DIR = -I$(ROOT_DIR)/include
@@ -124,9 +124,6 @@ capanalysis: $(SRC:.c=.o)
 	$(CC) $(CFLAGS) -o $@ $(SRC:.c=.o)  $(LDFLAGS)
 	mkdir -p tmp
 	mkdir -p xdecode
-
-pkgbin:
-	./uipkg.sh
 
 subdir:
 	@for dir in $(SUBDIRS) ; \
