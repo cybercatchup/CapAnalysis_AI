@@ -39,5 +39,17 @@ services:
     depends_on:
       - db
 
+  frontend:
+    build: ./www
+    ports:
+      - "9877:80"
+    environment:
+      DB_HOST: db
+      DB_USER: capana
+      DB_PASS: securepassword
+      DB_NAME: capanalysis
+    depends_on:
+      - db
+
 volumes:
   postgres_data:
